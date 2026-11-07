@@ -3,50 +3,82 @@ package domain
 import (
 	"BookShareWriteApi/internal/exception"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
-	"github.com/shopspring/decimal"
 )
 
+const MinPages = 50
+
 type Book struct {
-	id          uuid.UUID
-	name        string
-	description string
-	pages       int
-	price       decimal.Decimal
+	id             uuid.UUID
+	ownerID        uuid.UUID
+	name           string
+	normalizedName string
+	author         string
+	description    string
+	pages          int
+	createdAt      time.Time
 }
 
-func validateBookItem(name, description string, pages int, price decimal.Decimal) (error){
-	 if name == "" {
+func validateBook(ownerID uuid.UUID, name, author, description string, pages int) error {
+	if ownerID == uuid.Nil {
+		return exception.ErrInvalidOwner
+	}
+
+	if name == "" {
 		return exception.ErrEmptyName
+	}
+
+	if author == "" {
+		return exception.ErrEmptyAuthor
 	}
 
 	if description == "" {
 		return exception.ErrEmptyDescription
 	}
 
-	if pages <= 49 {
+	if pages < MinPages {
 		return exception.ErrPages
 	}
 
-	if price.IsNegative(){
-		return exception.ErrPrices
-	}
-
-    return nil
+	return nil
 }
 
-func NewBook(name, description string, pages int, price decimal.Decimal) (Book, error) {
-
+func NewBook(ownerID uuid.UUID, name, author, description string, pages int) (Book, error) {
 	name = strings.TrimSpace(name)
+	author = strings.TrimSpace(author)
 	description = strings.TrimSpace(description)
-	err:= validateBookItem(name, description, pages, price)
 
-	if err != nil{
+	if err := validateBook(ownerID, name, author, description, pages); err != nil {
 		return Book{}, err
 	}
 
-	return Book{id: uuid.New(), name:name, description: description, pages: pages, price: price}, nil
+	return Book{
+		id:             uuid.New(),
+		ownerID:        ownerID,
+		name:           name,
+		normalizedName: NormalizeBookName(name),
+		author:         author,
+		description:    description,
+		pages:          pages,
+		createdAt:      time.Now().UTC(),
+	}, nil
+}
+
+// RestoreBook reconstrói um livro que já está salvo no banco.
+// Não gera novo id nem revalida, pois os dados já passaram pelo NewBook.
+func RestoreBook(id, ownerID uuid.UUID, name, author, description string, pages int, createdAt time.Time) Book {
+	return Book{
+		id:             id,
+		ownerID:        ownerID,
+		name:           name,
+		normalizedName: NormalizeBookName(name),
+		author:         author,
+		description:    description,
+		pages:          pages,
+		createdAt:      createdAt,
+	}
 }
 
 func NormalizeBookName(name string) string {
@@ -54,7 +86,10 @@ func NormalizeBookName(name string) string {
 }
 
 func (b Book) ID() uuid.UUID          { return b.id }
+func (b Book) OwnerID() uuid.UUID     { return b.ownerID }
 func (b Book) Name() string           { return b.name }
+func (b Book) NormalizedName() string { return b.normalizedName }
+func (b Book) Author() string         { return b.author }
 func (b Book) Description() string    { return b.description }
 func (b Book) Pages() int             { return b.pages }
-func (b Book) Price() decimal.Decimal { return b.price }
+func (b Book) CreatedAt() time.Time   { return b.createdAt }

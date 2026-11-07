@@ -9,13 +9,9 @@ import (
 
 func writeError(w http.ResponseWriter, err error) {
 	switch {
-	case errors.Is(err, exception.ErrBookAlreadyExist):
+	case errors.Is(err, exception.ErrBookAlreadyExists):
 		http.Error(w, err.Error(), http.StatusConflict)
-	case errors.Is(err, exception.ErrEmptyName),
-		errors.Is(err, exception.ErrEmptyName),
-		errors.Is(err, exception.ErrEmptyDescription),
-		errors.Is(err, exception.ErrPages),
-		errors.Is(err, exception.ErrPrices):
+	case errors.Is(err, exception.ErrValidation):
 		http.Error(w, err.Error(), http.StatusBadRequest)
 	default:
 		log.Printf("internal error: %v", err)

@@ -6,20 +6,21 @@ import (
 	"context"
 
 	"github.com/google/uuid"
-	"github.com/shopspring/decimal"
 )
 
+// BookRepository tem só o que este use case precisa (ISP).
 type BookRepository interface {
-	ExistsByName(ctx context.Context, name string) (bool,error)
+	ExistsByNameAndAuthor(ctx context.Context, normalizedName, author string) (bool, error)
+	// Save deve retornar exception.ErrBookAlreadyExists quando o UNIQUE do banco for violado.
 	Save(ctx context.Context, book domain.Book) error
-	FindByName(ctx context.Context, name string) (domain.Book, error)
 }
 
-type RegisterBookInput struct{
+type RegisterBookInput struct {
+	OwnerID     uuid.UUID
 	Name        string
+	Author      string
 	Description string
 	Pages       int
-	Price       decimal.Decimal
 }
 
 type RegisterBookOutput struct {
@@ -27,27 +28,28 @@ type RegisterBookOutput struct {
 }
 
 type RegisterBookUseCase struct {
-	books  BookRepository
+	books BookRepository
 }
 
-func Register(books BookRepository) *RegisterBookUseCase{
+func NewRegisterBookUseCase(books BookRepository) *RegisterBookUseCase {
 	return &RegisterBookUseCase{books: books}
 }
 
-func (uc *RegisterBookUseCase) Execute(ctx context.Context, request RegisterBookInput) (RegisterBookOutput, error){
-	book, err := domain.NewBook(request.Name, request.Description, request.Pages, request.Price)
+func (uc *RegisterBookUseCase) Execute(ctx context.Context, input RegisterBookInput) (RegisterBookOutput, error) {
+	book, err := domain.NewBook(input.OwnerID, input.Name, input.Author, input.Description, input.Pages)
 	if err != nil {
 		return RegisterBookOutput{}, err
 	}
 
-	exists, err := uc.books.ExistsByName(ctx, book.Name())
-
+	// Checagem rápida para dar um erro amigável.
+	// Quem garante de verdade é o UNIQUE do banco (ver Save).
+	exists, err := uc.books.ExistsByNameAndAuthor(ctx, book.NormalizedName(), book.Author())
 	if err != nil {
 		return RegisterBookOutput{}, err
 	}
 
 	if exists {
-		return RegisterBookOutput{}, exception.ErrBookAlreadyExist
+		return RegisterBookOutput{}, exception.ErrBookAlreadyExists
 	}
 
 	if err := uc.books.Save(ctx, book); err != nil {
