@@ -2,7 +2,9 @@ package main
 
 import (
 	"BookShareWriteApi/internal/application"
+	"BookShareWriteApi/internal/infrastructure/outbox"
 	"BookShareWriteApi/internal/infrastructure/postgres"
+	"BookShareWriteApi/internal/infrastructure/rabbitmq"
 	"BookShareWriteApi/internal/interfaces/httpapi"
 	"context"
 	"errors"
@@ -17,12 +19,23 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-const defaultHTTPPort = "8081"
+const (
+	defaultHTTPPort = "8081"
+	eventsExchange  = "bookshare.events"
+
+	outboxInterval  = 2 * time.Second
+	outboxBatchSize = 50
+)
 
 func main() {
 	databaseURL := strings.TrimSpace(os.Getenv("DATABASE_URL"))
 	if databaseURL == "" {
 		log.Fatal("DATABASE_URL is required")
+	}
+
+	rabbitURL := strings.TrimSpace(os.Getenv("RABBITMQ_URL"))
+	if rabbitURL == "" {
+		log.Fatal("RABBITMQ_URL is required")
 	}
 
 	port := strings.TrimSpace(os.Getenv("HTTP_PORT"))
@@ -40,10 +53,24 @@ func main() {
 	}
 	defer pool.Close()
 
+	publisher, err := rabbitmq.NewPublisher(rabbitURL, eventsExchange)
+	if err != nil {
+		log.Fatalf("rabbitmq: %v", err)
+	}
+	defer publisher.Close()
+
 	// Composição: infraestrutura -> use case -> HTTP.
 	bookRepository := postgres.NewBookRepository(pool)
 	registerBook := application.NewRegisterBookUseCase(bookRepository)
 	router := httpapi.NewRouter(registerBook)
+
+	// Worker do outbox: roda em paralelo ao HTTP e para junto com o ctx.
+	relay := outbox.NewRelay(postgres.NewOutboxStore(pool), publisher, outboxInterval, outboxBatchSize)
+	relayDone := make(chan struct{})
+	go func() {
+		relay.Run(ctx)
+		close(relayDone)
+	}()
 
 	server := &http.Server{
 		Addr:              ":" + port,
@@ -77,6 +104,10 @@ func main() {
 	if err := server.Shutdown(shutdownCtx); err != nil {
 		log.Printf("shutdown: %v", err)
 	}
+
+	// Garante que o relay terminou o lote atual antes de fechar Rabbit e banco (defers).
+	stop()
+	<-relayDone
 }
 
 // newPool cria o pool e faz um Ping para falhar logo se o banco estiver fora.
