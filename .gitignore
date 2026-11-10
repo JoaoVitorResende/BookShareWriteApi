@@ -1,0 +1,9 @@
+# arquivos de teste local
+book.json
+
+# binários
+/write-api
+*.exe
+
+# env local
+.env

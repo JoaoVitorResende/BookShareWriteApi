@@ -1,0 +1,59 @@
+services:
+  books-write-db:
+    image: postgres:18
+    container_name: books-write-db
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: books_write
+    ports:
+      - "5434:5432" # acesso do Windows (pgAdmin, go run)
+    volumes:
+      - books-write-data:/var/lib/postgresql # Postgres 18: montar a pasta pai
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d books_write"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks:
+      - bookshare-net
+
+  # Roda as migrations uma vez e termina.
+  books-write-migrate:
+    image: migrate/migrate:v4.18.1
+    container_name: books-write-migrate
+    command:
+      - "-path=/migrations"
+      - "-database=postgres://postgres:postgres@books-write-db:5432/books_write?sslmode=disable"
+      - "up"
+    volumes:
+      - ./db/migrations:/migrations:ro
+    depends_on:
+      books-write-db:
+        condition: service_healthy # só roda quando o banco aceitar conexões
+    networks:
+      - bookshare-net
+
+  write-api:
+    build: .
+    container_name: book-write-api
+    environment:
+      # Dentro da rede do Docker, os serviços se acham pelo nome do container.
+      DATABASE_URL: postgres://postgres:postgres@books-write-db:5432/books_write?sslmode=disable
+      RABBITMQ_URL: ${RABBITMQ_URL:-amqp://guest:guest@rabbitmq:5672/}
+      HTTP_PORT: "8081"
+    ports:
+      - "8081:8081"
+    depends_on:
+      books-write-migrate:
+        condition: service_completed_successfully # só sobe depois das migrations
+    restart: unless-stopped # se o Rabbit ainda não estiver pronto, a API cai e o Docker sobe de novo
+    networks:
+      - bookshare-net
+
+volumes:
+  books-write-data:
+
+networks:
+  bookshare-net:
+    external: true # criada fora deste compose, compartilhada com UserApi e gateway
