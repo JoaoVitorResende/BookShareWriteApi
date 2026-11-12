@@ -4,6 +4,7 @@
 
 Write service (the **command** side of CQRS) of the **BookShare** project. It registers books, enforces the business rules and publishes events so the read side (Book Read API) stays up to date.
 
+
 ## Architecture
 
 ```
